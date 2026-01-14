@@ -21,7 +21,7 @@ import {
   Info,
   Eye
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ScoreChart from "./ScoreChart";
 import RadarChart from "./RadarChart";
 import MetricBars from "./MetricBars";
@@ -123,6 +123,556 @@ export default function ControlPanel({
   const [hoveredCheck, setHoveredCheck] = useState<string | null>(null);
   const [enhancedScore, setEnhancedScore] = useState(0);
   const [viewMode, setViewMode] = useState<'grid' | 'chart' | 'bars'>('grid');
+  const radarChartRef = useRef<HTMLDivElement | null>(null);
+
+  const getAllMetricsForRadar = () => {
+    return combinedChecks
+      .filter(check => check.status !== 'pending' && check.status !== 'checking')
+      .map(check => ({
+        label: check.label,
+        score: check.score || 0
+      }));
+  };
+
+  const handleExportPdf = async () => {
+    if (!analysisData) return;
+
+    try {
+      const [{ jsPDF }, html2canvasModule] = await Promise.all([
+        import('jspdf') as any,
+        import('html2canvas') as any,
+      ]);
+      const html2canvas = html2canvasModule.default || html2canvasModule;
+
+      // Capture monochrome radar chart from an offscreen render (so export works from any view)
+      let radarImageData: string | null = null;
+      if (radarChartRef.current) {
+        try {
+          const canvas = await html2canvas(radarChartRef.current, {
+            backgroundColor: '#ffffff',
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            ignoreElements: (element) => {
+              // Skip elements with problematic CSS
+              const style = window.getComputedStyle(element);
+              return false;
+            },
+            onclone: (clonedDoc) => {
+              // Force all colors to simple hex values in the cloned document
+              const allElements = clonedDoc.querySelectorAll('*');
+              allElements.forEach((el: any) => {
+                if (el.style) {
+                  // Remove any CSS color() functions
+                  const computed = window.getComputedStyle(el);
+                  if (computed.color && computed.color.includes('color(')) {
+                    el.style.color = '#000000';
+                  }
+                  if (computed.backgroundColor && computed.backgroundColor.includes('color(')) {
+                    el.style.backgroundColor = '#ffffff';
+                  }
+                  if (computed.fill && computed.fill.includes('color(')) {
+                    el.style.fill = '#000000';
+                  }
+                  if (computed.stroke && computed.stroke.includes('color(')) {
+                    el.style.stroke = '#000000';
+                  }
+                }
+              });
+            }
+          });
+          radarImageData = canvas.toDataURL('image/png');
+        } catch (canvasError) {
+          console.warn('Failed to capture radar chart, continuing without it:', canvasError);
+          // Continue without radar chart if capture fails
+        }
+      }
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 40;
+      let cursorY = margin;
+
+      const ensureSpace = (needed: number) => {
+        if (cursorY + needed > pageHeight - margin) {
+          doc.addPage();
+          cursorY = margin;
+        }
+      };
+
+      const writeWrapped = (text: string, fontSize: number, maxWidth: number, lineGap = 3) => {
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(fontSize);
+        const lines = doc.splitTextToSize(text, maxWidth);
+        lines.forEach((line: string) => {
+          ensureSpace(fontSize + lineGap);
+          doc.text(line, margin, cursorY);
+          cursorY += fontSize + lineGap;
+        });
+      };
+
+      const measureWrapped = (text: string, fontSize: number, maxWidth: number, lineGap = 3) => {
+        doc.setFontSize(fontSize);
+        const lines = doc.splitTextToSize(text, maxWidth);
+        return lines.length * (fontSize + lineGap);
+      };
+
+      const sectionTitle = (text: string) => {
+        ensureSpace(40);
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.text(text, margin, cursorY);
+        cursorY += 10;
+        doc.setDrawColor(0);
+        doc.setLineWidth(0.5);
+        doc.line(margin, cursorY, pageWidth - margin, cursorY);
+        cursorY += 14;
+      };
+
+      const card = (x: number, y: number, w: number, h: number) => {
+        doc.setDrawColor(0);
+        doc.setFillColor(250, 250, 250);
+        doc.roundedRect(x, y, w, h, 8, 8, 'FD');
+      };
+
+      // Header
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(20);
+      doc.text('InteractGEN', margin, cursorY);
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text('AI Readiness Report', margin + 120, cursorY);
+      cursorY += 18;
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(14);
+      const websiteLine = `Website: ${url}`;
+      const websiteLines = doc.splitTextToSize(websiteLine, pageWidth - margin * 2);
+      doc.text(websiteLines, margin, cursorY);
+      cursorY += websiteLines.length * 16 + 4;
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(`Generated: ${new Date().toLocaleString()}`, margin, cursorY);
+      cursorY += 14;
+      doc.setLineWidth(1);
+      doc.line(margin, cursorY, pageWidth - margin, cursorY);
+      cursorY += 18;
+
+      // Summary
+      sectionTitle('Summary');
+      const summaryScore = enhancedScore > 0 ? enhancedScore : overallScore;
+      const doneChecks = combinedChecks.filter(c => c.status !== 'pending' && c.status !== 'checking');
+      const countPass = doneChecks.filter(c => c.status === 'pass').length;
+      const countWarn = doneChecks.filter(c => c.status === 'warning').length;
+      const countFail = doneChecks.filter(c => c.status === 'fail').length;
+
+      ensureSpace(110);
+      const gap = 12;
+      const cardW = (pageWidth - margin * 2 - gap * 2) / 3;
+      const cardH = 86;
+      const y0 = cursorY;
+
+      card(margin, y0, cardW, cardH);
+      doc.setFont('Helvetica', 'bold'); doc.setFontSize(10);
+      doc.text('Overall Score', margin + 12, y0 + 18);
+      doc.setFont('Helvetica', 'bold'); doc.setFontSize(28);
+      doc.text(String(summaryScore), margin + 12, y0 + 56);
+      doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
+      doc.text('/ 100', margin + 70, y0 + 56);
+
+      card(margin + cardW + gap, y0, cardW, cardH);
+      doc.setFont('Helvetica', 'bold'); doc.setFontSize(10);
+      doc.text('Check Breakdown', margin + cardW + gap + 12, y0 + 18);
+      doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
+      doc.text(`Pass: ${countPass}`, margin + cardW + gap + 12, y0 + 38);
+      doc.text(`Warning: ${countWarn}`, margin + cardW + gap + 12, y0 + 54);
+      doc.text(`Fail: ${countFail}`, margin + cardW + gap + 12, y0 + 70);
+
+      card(margin + (cardW + gap) * 2, y0, cardW, cardH);
+      doc.setFont('Helvetica', 'bold'); doc.setFontSize(10);
+      doc.text('AI Insights', margin + (cardW + gap) * 2 + 12, y0 + 18);
+      doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
+      doc.text(`Count: ${aiInsights.length}`, margin + (cardW + gap) * 2 + 12, y0 + 38);
+      const avgAi = aiInsights.length > 0
+        ? Math.round(aiInsights.reduce((sum, c) => sum + (c.score || 0), 0) / aiInsights.length)
+        : null;
+      doc.text(`Avg Score: ${avgAi === null ? '—' : avgAi}`, margin + (cardW + gap) * 2 + 12, y0 + 54);
+
+      cursorY = y0 + cardH + 18;
+
+      const narrative = String(analysisData.overallAIReadiness || '').trim();
+      const priorities: string[] = Array.isArray(analysisData.topPriorities) ? analysisData.topPriorities : [];
+      if (narrative || priorities.length > 0) {
+        ensureSpace(140);
+        const h = 120;
+        card(margin, cursorY, pageWidth - margin * 2, h);
+        doc.setFont('Helvetica', 'bold'); doc.setFontSize(10);
+        doc.text('Key Notes', margin + 12, cursorY + 18);
+
+        let y = cursorY + 34;
+        doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
+        if (narrative) {
+          const used = measureWrapped(`Summary: ${narrative}`, 10, pageWidth - margin * 2 - 24, 2);
+          doc.text(doc.splitTextToSize(`Summary: ${narrative}`, pageWidth - margin * 2 - 24), margin + 12, y);
+          y += used + 6;
+        }
+        if (priorities.length > 0) {
+          doc.setFont('Helvetica', 'bold'); doc.setFontSize(10);
+          doc.text('Top Priorities:', margin + 12, y);
+          y += 14;
+          doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
+          priorities.forEach((p, i) => {
+            const lines = doc.splitTextToSize(`${i + 1}. ${p}`, pageWidth - margin * 2 - 36);
+            doc.text(lines, margin + 18, y);
+            y += lines.length * 12;
+          });
+        }
+        cursorY += h + 18;
+      }
+
+      // Radar chart + metrics table
+      const allMetrics = getAllMetricsForRadar();
+      if (allMetrics.length > 0) {
+        sectionTitle('Radar Chart (All Metrics)');
+        const chartW = pageWidth - margin * 2;
+        const chartH = chartW * 0.72;
+        ensureSpace(chartH + 12);
+        
+        if (radarImageData) {
+          // Use captured image if available
+          try {
+            card(margin, cursorY, chartW, chartH);
+            doc.addImage(radarImageData, 'PNG', margin + 12, cursorY + 12, chartW - 24, chartH - 24, undefined, 'FAST');
+            cursorY += chartH + 18;
+          } catch (imgError) {
+            console.warn('Failed to add radar image, drawing simple chart instead:', imgError);
+            // Fall through to draw simple chart
+            radarImageData = null;
+          }
+        }
+        
+        // If image capture failed or wasn't available, draw a simple radar chart using jsPDF
+        if (!radarImageData) {
+          const chartX = margin + 12;
+          const chartY = cursorY + 12;
+          const chartSize = Math.min(chartW - 24, chartH - 24);
+          const centerX = chartX + chartSize / 2;
+          const centerY = chartY + chartSize / 2;
+          const radius = chartSize / 2 - 40;
+          
+          // Draw grid circles
+          doc.setDrawColor(200, 200, 200);
+          doc.setLineWidth(0.5);
+          for (let level = 1; level <= 5; level++) {
+            const r = (radius * level) / 5;
+            doc.circle(centerX, centerY, r, 'D');
+          }
+          
+          // Draw axes
+          const angleStep = (Math.PI * 2) / allMetrics.length;
+          doc.setDrawColor(200, 200, 200);
+          doc.setLineWidth(0.5);
+          for (let i = 0; i < allMetrics.length; i++) {
+            const angle = i * angleStep - Math.PI / 2;
+            const x2 = centerX + radius * Math.cos(angle);
+            const y2 = centerY + radius * Math.sin(angle);
+            doc.line(centerX, centerY, x2, y2);
+          }
+          
+          // Draw data polygon
+          doc.setDrawColor(0, 0, 0);
+          doc.setFillColor(240, 240, 240);
+          doc.setLineWidth(1);
+          const points: number[][] = [];
+          for (let i = 0; i < allMetrics.length; i++) {
+            const angle = i * angleStep - Math.PI / 2;
+            const r = (allMetrics[i].score / 100) * radius;
+            const x = centerX + r * Math.cos(angle);
+            const y = centerY + r * Math.sin(angle);
+            points.push([x, y]);
+          }
+          
+          // Draw polygon outline
+          if (points.length > 0) {
+            doc.setDrawColor(0, 0, 0);
+            doc.setLineWidth(1.5);
+            // Draw polygon outline
+            for (let i = 0; i < points.length; i++) {
+              const p1 = points[i];
+              const p2 = points[(i + 1) % points.length];
+              doc.line(p1[0], p1[1], p2[0], p2[1]);
+            }
+            // Draw lines from center to each point for better visibility
+            doc.setLineWidth(0.5);
+            doc.setDrawColor(200, 200, 200);
+            for (const p of points) {
+              doc.line(centerX, centerY, p[0], p[1]);
+            }
+          }
+          
+          // Draw data points and labels
+          doc.setFontSize(8);
+          for (let i = 0; i < allMetrics.length; i++) {
+            const angle = i * angleStep - Math.PI / 2;
+            const r = (allMetrics[i].score / 100) * radius;
+            const x = centerX + r * Math.cos(angle);
+            const y = centerY + r * Math.sin(angle);
+            
+            // Data point
+            doc.setFillColor(0, 0, 0);
+            doc.circle(x, y, 3, 'F');
+            
+            // Label - use full label without truncation
+            const labelR = radius + 35; // Increased distance for longer labels
+            const labelX = centerX + labelR * Math.cos(angle);
+            const labelY = centerY + labelR * Math.sin(angle);
+            doc.setTextColor(0, 0, 0);
+            doc.setFont('Helvetica', 'normal');
+            doc.setFontSize(7); // Slightly smaller font to fit more text
+            // Split long labels across multiple lines if needed
+            const labelLines = doc.splitTextToSize(allMetrics[i].label, 60); // Max width for label
+            labelLines.forEach((line: string, lineIdx: number) => {
+              doc.text(line, labelX, labelY + (lineIdx * 8), { align: 'center' });
+            });
+            doc.setFontSize(7);
+            doc.text(`${allMetrics[i].score}%`, labelX, labelY + (labelLines.length * 8) + 6, { align: 'center' });
+          }
+          
+          cursorY += chartH + 18;
+        }
+        
+        // Add a complete metrics list below the chart to ensure all metrics are visible
+        ensureSpace(60);
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('All Metrics (Complete List):', margin + 12, cursorY);
+        cursorY += 14;
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(8);
+        const metricsPerColumn = Math.ceil(allMetrics.length / 2);
+        const colWidth = (pageWidth - margin * 2 - 24) / 2;
+        let col1Y = cursorY;
+        let col2Y = cursorY;
+        
+        allMetrics.forEach((metric, idx) => {
+          const isSecondColumn = idx >= metricsPerColumn;
+          const xPos = isSecondColumn ? margin + 12 + colWidth + 12 : margin + 12;
+          const yPos = isSecondColumn ? col2Y : col1Y;
+          
+          const metricText = `${metric.label}: ${metric.score}%`;
+          const lines = doc.splitTextToSize(metricText, colWidth - 8);
+          lines.forEach((line: string, lineIdx: number) => {
+            doc.text(line, xPos, yPos + (lineIdx * 10));
+          });
+          
+          if (isSecondColumn) {
+            col2Y += lines.length * 10 + 4;
+          } else {
+            col1Y += lines.length * 10 + 4;
+          }
+        });
+        
+        cursorY = Math.max(col1Y, col2Y) + 12;
+      }
+
+      sectionTitle('Metrics Table');
+      const rows = doneChecks.map(c => ({
+        label: c.label,
+        id: c.id,
+        score: c.score ?? 0,
+        status: c.status,
+        category: (c as any).isAI ? 'AI' : (['robots-txt', 'sitemap', 'llms-txt'].includes(c.id) ? 'Domain' : 'Page'),
+      }));
+
+      const tableW = pageWidth - margin * 2;
+      const colMetricW = 310;
+      const colCatW = 70;
+      const colScoreW = 40;
+      const colStatusW = tableW - colMetricW - colCatW - colScoreW;
+      const xMetric = margin + 8;
+      const xCat = margin + 8 + colMetricW;
+      const xScore = xCat + colCatW;
+      const xStatus = xScore + colScoreW;
+
+      const drawTableHeader = () => {
+        ensureSpace(26);
+        doc.setFillColor(245, 245, 245);
+        doc.rect(margin, cursorY, tableW, 22, 'F');
+        doc.setDrawColor(0);
+        doc.rect(margin, cursorY, tableW, 22, 'S');
+        doc.setFont('Helvetica', 'bold'); doc.setFontSize(9);
+        doc.text('Metric', xMetric, cursorY + 14);
+        doc.text('Type', xCat, cursorY + 14);
+        doc.text('Score', xScore, cursorY + 14);
+        doc.text('Status', xStatus, cursorY + 14);
+        cursorY += 22;
+      };
+
+      drawTableHeader();
+      doc.setFont('Helvetica', 'normal'); doc.setFontSize(9);
+      rows.forEach(r => {
+        const metricText = `${r.label} (${r.id})`;
+        const metricLines = doc.splitTextToSize(metricText, colMetricW - 14);
+        const rowH = Math.max(18, metricLines.length * 12);
+        if (cursorY + rowH > pageHeight - margin) {
+          doc.addPage();
+          cursorY = margin;
+          drawTableHeader();
+        }
+        doc.rect(margin, cursorY, tableW, rowH, 'S');
+        doc.text(metricLines, xMetric, cursorY + 12);
+        doc.text(String(r.category), xCat, cursorY + 12);
+        doc.text(String(r.score), xScore, cursorY + 12);
+        doc.text(String(r.status).toUpperCase(), xStatus, cursorY + 12);
+        cursorY += rowH;
+      });
+      cursorY += 18;
+
+      // Detailed findings (still UI-structured, no raw JSON)
+      sectionTitle('Detailed Findings');
+      const contentW = pageWidth - margin * 2 - 24;
+      const sanitizeText = (text: string): string => {
+        if (!text) return '';
+        // Replace common problematic characters that jsPDF might not handle well
+        let sanitized = String(text);
+        // Replace arrow characters with ASCII equivalents
+        sanitized = sanitized.replace(/\u2192/g, '->');  // →
+        sanitized = sanitized.replace(/\u2190/g, '<-');  // ←
+        sanitized = sanitized.replace(/\u21D2/g, '=>');  // ⇒
+        sanitized = sanitized.replace(/\u21D0/g, '<=');  // ⇐
+        // Replace checkmarks and X marks
+        sanitized = sanitized.replace(/\u2713/g, '[Found]');  // ✓
+        sanitized = sanitized.replace(/\u2714/g, '[Found]');  // ✔
+        sanitized = sanitized.replace(/\u2715/g, '[Not Found]');   // ✕
+        sanitized = sanitized.replace(/\u2716/g, '[Not Found]');   // ✖
+        sanitized = sanitized.replace(/\u2717/g, '[Not Found]');   // ✗
+        sanitized = sanitized.replace(/\u2718/g, '[Not Found]');   // ✘
+        // Replace other common symbols
+        sanitized = sanitized.replace(/\u2022/g, '*');     // •
+        sanitized = sanitized.replace(/\u25CF/g, '*');     // ●
+        sanitized = sanitized.replace(/\u25CB/g, 'o');     // ○
+        sanitized = sanitized.replace(/\u25AA/g, '*');     // ▪
+        sanitized = sanitized.replace(/\u25AB/g, '*');     // ▫
+        sanitized = sanitized.replace(/\u25B6/g, '>');     // ▶
+        sanitized = sanitized.replace(/\u25C0/g, '<');     // ◀
+        // Replace dashes and quotes
+        sanitized = sanitized.replace(/\u2013/g, '-');     // –
+        sanitized = sanitized.replace(/\u2014/g, '--');    // —
+        sanitized = sanitized.replace(/\u201C/g, '"');     // "
+        sanitized = sanitized.replace(/\u201D/g, '"');     // "
+        sanitized = sanitized.replace(/\u2018/g, "'");     // '
+        sanitized = sanitized.replace(/\u2019/g, "'");     // '
+        sanitized = sanitized.replace(/\u201A/g, ',');     // ‚
+        sanitized = sanitized.replace(/\u201B/g, "'");     // ‛
+        sanitized = sanitized.replace(/\u201E/g, '"');     // „
+        sanitized = sanitized.replace(/\u201F/g, '"');     // ‟
+        // Replace ellipsis
+        sanitized = sanitized.replace(/\u2026/g, '...');   // …
+        // Replace copyright and trademark symbols
+        sanitized = sanitized.replace(/\u00A9/g, '(c)');    // ©
+        sanitized = sanitized.replace(/\u00AE/g, '(R)');    // ®
+        sanitized = sanitized.replace(/\u2122/g, '(TM)'); // ™
+        // Replace degree and other symbols
+        sanitized = sanitized.replace(/\u00B0/g, 'deg'); // °
+        sanitized = sanitized.replace(/\u00B1/g, '+/-');   // ±
+        sanitized = sanitized.replace(/\u00D7/g, 'x');     // ×
+        sanitized = sanitized.replace(/\u00F7/g, '/');      // ÷
+        // Replace currency symbols
+        sanitized = sanitized.replace(/\u00A2/g, 'cents');  // ¢
+        sanitized = sanitized.replace(/\u00A3/g, 'GBP');     // £
+        sanitized = sanitized.replace(/\u00A4/g, 'EUR');    // ¤
+        sanitized = sanitized.replace(/\u00A5/g, 'JPY');   // ¥
+        sanitized = sanitized.replace(/\u20AC/g, 'EUR');     // €
+        sanitized = sanitized.replace(/\u00A3/g, 'GBP');      // £
+        return sanitized;
+      };
+
+      const drawCheck = (check: any) => {
+        const title = `${check.isAI ? 'AI: ' : ''}${sanitizeText(check.label)}`;
+        const status = String(check.status).toUpperCase();
+        const score = check.score ?? 0;
+
+        const details = check.details ? sanitizeText(String(check.details)) : '';
+        const rec = check.recommendation ? sanitizeText(String(check.recommendation)) : '';
+        const actions: string[] = Array.isArray(check.actionItems) 
+          ? check.actionItems.map(a => sanitizeText(String(a)))
+          : [];
+
+        // Measure required height
+        let needed = 54; // title + meta
+        if (details) needed += 14 + measureWrapped(details, 9, contentW, 2) + 6;
+        if (rec) needed += 14 + measureWrapped(rec, 9, contentW, 2) + 6;
+        if (actions.length > 0) {
+          needed += 14;
+          actions.forEach(a => { needed += measureWrapped(`• ${a}`, 9, contentW, 2) + 2; });
+          needed += 6;
+        }
+        needed = Math.min(Math.max(needed, 90), pageHeight - margin * 2); // clamp to page
+
+        ensureSpace(needed + 10);
+        card(margin, cursorY, pageWidth - margin * 2, needed);
+        const startY = cursorY;
+
+        doc.setFont('Helvetica', 'bold'); doc.setFontSize(11);
+        doc.text(title, margin + 12, startY + 20);
+        doc.setFont('Helvetica', 'normal'); doc.setFontSize(9);
+        doc.text(`Status: ${status}   |   Score: ${score}`, margin + 12, startY + 36);
+
+        let y = startY + 54;
+        doc.setFont('Helvetica', 'normal'); doc.setFontSize(9);
+        if (details) {
+          doc.setFont('Helvetica', 'bold'); doc.setFontSize(9);
+          doc.text('Details:', margin + 12, y);
+          y += 12;
+          doc.setFont('Helvetica', 'normal'); doc.setFontSize(9);
+          const lines = doc.splitTextToSize(details, contentW);
+          doc.text(lines, margin + 12, y);
+          y += lines.length * 11 + 6;
+        }
+        if (rec) {
+          doc.setFont('Helvetica', 'bold'); doc.setFontSize(9);
+          doc.text('Recommendation:', margin + 12, y);
+          y += 12;
+          doc.setFont('Helvetica', 'normal'); doc.setFontSize(9);
+          const lines = doc.splitTextToSize(rec, contentW);
+          doc.text(lines, margin + 12, y);
+          y += lines.length * 11 + 6;
+        }
+        if (actions.length > 0) {
+          doc.setFont('Helvetica', 'bold'); doc.setFontSize(9);
+          doc.text('Action Items:', margin + 12, y);
+          y += 12;
+          doc.setFont('Helvetica', 'normal'); doc.setFontSize(9);
+          actions.forEach(a => {
+            const lines = doc.splitTextToSize(`• ${a}`, contentW);
+            doc.text(lines, margin + 12, y);
+            y += lines.length * 11 + 2;
+          });
+        }
+
+        cursorY = startY + needed + 12;
+      };
+
+      doneChecks.forEach(c => drawCheck(c));
+
+      // Create filename with sanitized URL
+      let urlForFilename = url
+        .replace(/https?:\/\//g, '') // Remove protocol
+        .replace(/\/$/, '') // Remove trailing slash
+        .replace(/[^a-zA-Z0-9.-]/g, '-') // Replace non-alphanumeric with dash
+        .replace(/-+/g, '-') // Replace multiple dashes with single dash
+        .replace(/^-|-$/g, '') // Remove leading/trailing dashes
+        .substring(0, 50);
+      // Remove trailing dash if present
+      urlForFilename = urlForFilename.replace(/-$/, '');
+      doc.save(`interactgen-ai-readiness-report-${urlForFilename}.pdf`);
+    } catch (error) {
+      console.error('Failed to export PDF:', error);
+    }
+  };
 
   useEffect(() => {
     if (analysisData && analysisData.checks && showResults) {
@@ -574,9 +1124,8 @@ export default function ControlPanel({
               <RadarChart 
                 data={checks
                   .filter(check => check.status !== 'pending' && check.status !== 'checking')
-                  .slice(0, 8)
                   .map(check => ({
-                    label: check.label.length > 12 ? check.label.substring(0, 12) + '...' : check.label,
+                    label: check.label,
                     score: check.score || 0
                   }))}
                 size={350}
@@ -677,13 +1226,19 @@ export default function ControlPanel({
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.8 }}
-          className="flex gap-12 justify-center"
+          className="flex flex-wrap gap-12 justify-center"
         >
           <button
             onClick={onReset}
             className="px-20 py-10 bg-accent-white border border-black-alpha-8 hover:bg-black-alpha-4 rounded-8 text-label-medium transition-all"
           >
             Analyze Another Site
+          </button>
+          <button
+            onClick={handleExportPdf}
+            className="px-20 py-10 bg-accent-white border border-black-alpha-8 hover:bg-black-alpha-4 rounded-8 text-label-medium transition-all"
+          >
+            Export Report (PDF)
           </button>
           {true && ( 
             <button 
@@ -836,6 +1391,33 @@ export default function ControlPanel({
             </button>
           )}
         </motion.div>
+      )}
+
+      {/* Offscreen monochrome radar chart for PDF export (works from any view mode) */}
+      {showResults && (
+        <div
+          ref={radarChartRef}
+          style={{
+            position: 'absolute',
+            left: -10000,
+            top: 0,
+            width: 1,
+            height: 1,
+            overflow: 'hidden',
+            background: '#ffffff',
+          }}
+          aria-hidden="true"
+        >
+          <div style={{ background: '#ffffff', padding: 16, width: 700 }}>
+            <RadarChart
+              data={getAllMetricsForRadar()}
+              size={520}
+              variant="mono"
+              showLegend={false}
+              disableAnimation={true}
+            />
+          </div>
+        </div>
       )}
     </motion.div>
   );

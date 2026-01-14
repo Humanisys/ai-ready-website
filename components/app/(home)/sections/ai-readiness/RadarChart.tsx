@@ -10,17 +10,20 @@ interface RadarChartProps {
     maxScore?: number;
   }[];
   size?: number;
+  variant?: 'color' | 'mono';
+  showLegend?: boolean;
+  disableAnimation?: boolean;
 }
 
-export default function RadarChart({ data, size = 300 }: RadarChartProps) {
-  const [isAnimated, setIsAnimated] = useState(false);
+export default function RadarChart({ data, size = 300, variant = 'color', showLegend = true, disableAnimation = false }: RadarChartProps) {
+  const [isAnimated, setIsAnimated] = useState(disableAnimation ? true : false);
   const center = size / 2;
   const radius = (size / 2) - 60; // Increased padding for labels
   const angleStep = (Math.PI * 2) / data.length;
   
   useEffect(() => {
-    setIsAnimated(true);
-  }, []);
+    if (!disableAnimation) setIsAnimated(true);
+  }, [disableAnimation]);
   
   // Calculate points for the polygon
   const getPoint = (value: number, index: number) => {
@@ -46,19 +49,21 @@ export default function RadarChart({ data, size = 300 }: RadarChartProps) {
   return (
     <div className="relative">
       <svg width={size} height={size} className="overflow-visible">
-        <defs>
-          <linearGradient id="radar-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#FF4A00" stopOpacity="0.8" />
-            <stop offset="100%" stopColor="#FF8533" stopOpacity="0.3" />
-          </linearGradient>
-          <filter id="radar-glow">
-            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-            <feMerge>
-              <feMergeNode in="coloredBlur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
+        {variant === 'color' && (
+          <defs>
+            <linearGradient id="radar-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#FF4A00" stopOpacity="0.8" />
+              <stop offset="100%" stopColor="#FF8533" stopOpacity="0.3" />
+            </linearGradient>
+            <filter id="radar-glow">
+              <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+              <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+        )}
         
         {/* Grid circles */}
         {gridLevels.map((level) => (
@@ -94,13 +99,13 @@ export default function RadarChart({ data, size = 300 }: RadarChartProps) {
         {/* Data polygon */}
         <motion.polygon
           points={polygonPoints}
-          fill="url(#radar-gradient)"
-          stroke="#FF4A00"
+          fill={variant === 'color' ? 'url(#radar-gradient)' : 'rgba(0,0,0,0.10)'}
+          stroke={variant === 'color' ? '#FF4A00' : '#111111'}
           strokeWidth="2"
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          filter="url(#radar-glow)"
+          filter={variant === 'color' ? 'url(#radar-glow)' : undefined}
         />
         
         {/* Data points */}
@@ -112,8 +117,8 @@ export default function RadarChart({ data, size = 300 }: RadarChartProps) {
               cx={point.x}
               cy={point.y}
               r="4"
-              fill="#FF4A00"
-              stroke="white"
+              fill={variant === 'color' ? '#FF4A00' : '#111111'}
+              stroke={variant === 'color' ? 'white' : '#ffffff'}
               strokeWidth="2"
               initial={{ scale: 0 }}
               animate={{ scale: isAnimated ? 1 : 0 }}
@@ -171,7 +176,9 @@ export default function RadarChart({ data, size = 300 }: RadarChartProps) {
                 y={y + dy}
                 textAnchor={textAnchor as any}
                 dominantBaseline="middle"
-                className="text-xs fill-black-alpha-80 font-medium"
+                fill="rgba(0,0,0,0.80)"
+                fontSize="10"
+                fontWeight="600"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 1 + i * 0.05 }}
@@ -185,7 +192,9 @@ export default function RadarChart({ data, size = 300 }: RadarChartProps) {
                 y={y + dy + 12}
                 textAnchor={textAnchor as any}
                 dominantBaseline="middle"
-                className="text-[10px] fill-heat-100 font-bold"
+                fill={variant === 'color' ? '#FF4A00' : 'rgba(0,0,0,0.70)'}
+                fontSize="9"
+                fontWeight="700"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 1.1 + i * 0.05 }}
@@ -199,22 +208,24 @@ export default function RadarChart({ data, size = 300 }: RadarChartProps) {
       </svg>
       
       {/* Legend */}
-      <div className="mt-16 flex justify-center">
-        <div className="inline-flex flex-row gap-16 text-xs text-black-alpha-48 bg-white px-16 py-8 rounded-6 shadow-sm">
-          <div className="flex items-center gap-8">
-            <div className="w-12 h-12 rounded-full bg-heat-200" />
-            <span className="whitespace-nowrap">80-100%</span>
-          </div>
-          <div className="flex items-center gap-8">
-            <div className="w-12 h-12 rounded-full bg-heat-100" />
-            <span className="whitespace-nowrap">60-79%</span>
-          </div>
-          <div className="flex items-center gap-8">
-            <div className="w-12 h-12 rounded-full bg-heat-50" />
-            <span className="whitespace-nowrap">&lt;60%</span>
+      {showLegend && (
+        <div className="mt-16 flex justify-center">
+          <div className="inline-flex flex-row gap-16 text-xs text-black-alpha-48 bg-white px-16 py-8 rounded-6 shadow-sm">
+            <div className="flex items-center gap-8">
+              <div className={`w-12 h-12 rounded-full ${variant === 'color' ? 'bg-heat-200' : 'bg-black'}`} />
+              <span className="whitespace-nowrap">80-100%</span>
+            </div>
+            <div className="flex items-center gap-8">
+              <div className={`w-12 h-12 rounded-full ${variant === 'color' ? 'bg-heat-100' : 'bg-black-alpha-64'}`} />
+              <span className="whitespace-nowrap">60-79%</span>
+            </div>
+            <div className="flex items-center gap-8">
+              <div className={`w-12 h-12 rounded-full ${variant === 'color' ? 'bg-heat-50' : 'bg-black-alpha-32'}`} />
+              <span className="whitespace-nowrap">&lt;60%</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

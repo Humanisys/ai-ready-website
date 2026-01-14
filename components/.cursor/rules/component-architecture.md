@@ -53,7 +53,7 @@ import { BillingBanner } from '@/components/shared/billing/billing-banner';
 ```
 
 ## Component Creation Checklist
-1. Determine scope: Is it used in multiple places? → `/shared`, Single page? → `/app`
+1. Determine scope: Is it used in multiple places? > `/shared`, Single page? > `/app`
 2. Check for existing similar components to extend/compose
 3. Follow fire design conventions (colors, animations, spacing)
 4. Export properly in relevant index.ts for clean imports

@@ -33,7 +33,7 @@ The flame effects are data-driven ASCII animations that create subtle, fire-insp
 
 #### FlameBackground (Wrapper)
 - Intensity based on metrics (0-100)
-- Dynamic color (black → orange)
+- Dynamic color (black > orange)
 - Speed increases with intensity
 - Optional pulse animation
 

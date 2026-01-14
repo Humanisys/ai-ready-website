@@ -45,7 +45,9 @@
     "sonner": "^1.4.41",
     "tailwind-gradient-mask-image": "^1.2.0",
     "tailwind-merge": "^2.2.1",
-    "usehooks-ts": "^3.1.1"
+    "usehooks-ts": "^3.1.1",
+    "jspdf": "^2.5.1",
+    "html2canvas": "^1.4.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.4",

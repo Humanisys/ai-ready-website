@@ -85,7 +85,7 @@ async function analyzeHTML(html: string, metadata: any, url: string): Promise<Ch
   for (let i = 1; i < headingLevels.length; i++) {
     if (headingLevels[i] - headingLevels[i-1] > 1) {
       headingScore -= 15;
-      headingIssues.push(`Skipped heading level (H${headingLevels[i-1]} → H${headingLevels[i]})`);
+      headingIssues.push(`Skipped heading level (H${headingLevels[i-1]} > H${headingLevels[i]})`);
     }
   }
   
@@ -98,7 +98,7 @@ async function analyzeHTML(html: string, metadata: any, url: string): Promise<Ch
     score: headingScore,
     details: headingIssues.length > 0 ? headingIssues.join(', ') : `Perfect hierarchy with ${h1Count} H1 and logical structure`,
     recommendation: headingScore < 80 ? 
-      'Use exactly one H1 and maintain logical heading hierarchy (H1→H2→H3)' : 
+      'Use exactly one H1 and maintain logical heading hierarchy (H1>H2>H3)' : 
       'Excellent heading structure for AI comprehension'
   });
   
