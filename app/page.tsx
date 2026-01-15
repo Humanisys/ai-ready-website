@@ -40,6 +40,10 @@ export default function StyleGuidePage() {
   const [analysisData, setAnalysisData] = useState<any>(null);
   const [hasOpenAIKey, setHasOpenAIKey] = useState(false);
   const [urlError, setUrlError] = useState<string>("");
+  const [isGeneratingLlmsTxt, setIsGeneratingLlmsTxt] = useState(false);
+  const [llmsTxtContent, setLlmsTxtContent] = useState<string | null>(null);
+  const [llmsTxtError, setLlmsTxtError] = useState<string | null>(null);
+  const [showLlmsTxtModal, setShowLlmsTxtModal] = useState(false);
   
   // Check for API keys on mount
   useEffect(() => {
@@ -291,11 +295,154 @@ export default function StyleGuidePage() {
                 </div>
               </div>
               
+              {/* Generate llms.txt Button - Always visible */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="mt-16 flex justify-center"
+              >
+                <button
+                  onClick={async () => {
+                    if (!url) {
+                      setUrlError('Please enter a URL first');
+                      return;
+                    }
+                    
+                    setIsGeneratingLlmsTxt(true);
+                    setLlmsTxtError(null);
+                    setLlmsTxtContent(null);
+                    
+                    try {
+                      // Auto-prepend https:// if no protocol is provided
+                      let processedUrl = url.trim();
+                      if (!processedUrl.match(/^https?:\/\//i)) {
+                        processedUrl = 'https://' + processedUrl;
+                      }
+                      
+                      // Validate URL format
+                      try {
+                        const urlObj = new URL(processedUrl);
+                        if (!['http:', 'https:'].includes(urlObj.protocol)) {
+                          setLlmsTxtError('Please enter a valid URL (e.g., example.com)');
+                          setIsGeneratingLlmsTxt(false);
+                          return;
+                        }
+                      } catch (error) {
+                        setLlmsTxtError('Please enter a valid URL (e.g., example.com)');
+                        setIsGeneratingLlmsTxt(false);
+                        return;
+                      }
+                      
+                      const response = await fetch('/api/generate-llms-txt', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ url: processedUrl }),
+                      });
+                      
+                      const data = await response.json();
+                      
+                      if (data.success) {
+                        setLlmsTxtContent(data.content);
+                        setShowLlmsTxtModal(true);
+                      } else {
+                        setLlmsTxtError(data.error || 'Failed to generate llms.txt');
+                      }
+                    } catch (error) {
+                      console.error('LLMs.txt generation error:', error);
+                      setLlmsTxtError('An error occurred while generating llms.txt');
+                    } finally {
+                      setIsGeneratingLlmsTxt(false);
+                    }
+                  }}
+                  disabled={isGeneratingLlmsTxt || !url}
+                  className="px-20 py-10 bg-heat-100 hover:bg-heat-200 text-white rounded-8 text-label-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isGeneratingLlmsTxt ? 'Generating llms.txt...' : 'Generate llms.txt'}
+                </button>
+              </motion.div>
+              
               {/* Hero Scraping Animation */}
               <HeroScraping />
             </motion.div>
           )}
         </section>
+
+        {/* LLMs.txt Modal */}
+        <AnimatePresence>
+          {showLlmsTxtModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black-alpha-64 z-50 flex items-center justify-center p-16"
+              onClick={() => setShowLlmsTxtModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-accent-white rounded-12 p-24 max-w-800 w-full max-h-[80vh] flex flex-col shadow-xl"
+              >
+                <div className="flex items-center justify-between mb-16">
+                  <h3 className="text-title-h3 text-accent-black">Generated llms.txt</h3>
+                  <button
+                    onClick={() => setShowLlmsTxtModal(false)}
+                    className="text-black-alpha-48 hover:text-accent-black transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+                
+                {llmsTxtError && (
+                  <div className="mb-16 p-12 bg-heat-200 bg-opacity-20 rounded-8 text-body-small text-heat-200">
+                    {llmsTxtError}
+                  </div>
+                )}
+                
+                {llmsTxtContent && (
+                  <>
+                    <div className="flex-1 overflow-auto mb-16">
+                      <pre className="bg-black-alpha-4 p-16 rounded-8 text-body-small text-accent-black whitespace-pre-wrap font-mono overflow-x-auto">
+                        {llmsTxtContent}
+                      </pre>
+                    </div>
+                    <div className="flex gap-12">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(llmsTxtContent);
+                          alert('Copied to clipboard!');
+                        }}
+                        className="px-20 py-10 bg-accent-black hover:bg-black-alpha-80 text-white rounded-8 text-label-medium transition-all"
+                      >
+                        Copy to Clipboard
+                      </button>
+                      <button
+                        onClick={() => {
+                          const blob = new Blob([llmsTxtContent], { type: 'text/plain' });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = 'llms.txt';
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="px-20 py-10 bg-accent-white border border-black-alpha-8 hover:bg-black-alpha-4 rounded-8 text-label-medium transition-all"
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </HeaderProvider>
   );
