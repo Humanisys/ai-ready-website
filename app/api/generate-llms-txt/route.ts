@@ -170,7 +170,7 @@ async function generateLlmsTxtContent(level1Urls: string[], domain: string): Pro
         messages: [
           {
             role: 'system',
-            content: 'You are an expert at generating llms.txt files. Generate a well-structured llms.txt file following the exact format specified. Use markdown-style formatting with titles, descriptions, sections, and bullet points.'
+            content: 'You are an expert at generating llms.txt files. Generate a well-structured llms.txt file following the exact format specified. Use markdown-style formatting with titles, descriptions, sections, and bullet points. Always provide detailed, informative descriptions that help AI systems understand the content and purpose of each page.'
           },
           {
             role: 'user',
@@ -193,15 +193,24 @@ Optional details go here
 
 Requirements:
 1. Start with a # Title (the main title for the website)
-2. Add an optional description using > quote format
-3. Add optional details as plain text
-4. Create sections using ## Section name
-5. List links using - [Link title](url): Optional details format
-6. Group related pages into logical sections
-7. Use descriptive link titles based on the URL path
-8. Keep it concise but informative
+2. Add a detailed description using > quote format that explains what the website is about, its purpose, and main offerings
+3. Add optional details as plain text that provide additional context about the website structure, content types, or key features
+4. Create sections using ## Section name - use descriptive section names that categorize the pages logically
+5. List links using - [Link title](url): Optional link details format
+   - Link titles should be clear and descriptive (not just the URL path)
+   - Link details should be detailed and informative, explaining what content or functionality each page provides
+   - Include information about what users/AI systems can expect to find on each page
+   - Describe the purpose, content type, or key information available on each page
+6. Group related pages into logical sections based on their purpose or content type
+7. Use descriptive link titles based on the URL path - infer the page purpose from the URL structure
+8. Make descriptions detailed and helpful - explain what each page contains, its purpose, and why it's valuable
+9. For each link, provide a comprehensive description that helps AI systems understand:
+   - What type of content is on the page
+   - What information or functionality it provides
+   - How it relates to the overall website structure
+   - What value it offers to users or AI systems
 
-Generate only the llms.txt content in the exact format above, no markdown code blocks or explanations.`
+Generate only the llms.txt content in the exact format above, no markdown code blocks or explanations. Make sure all descriptions are detailed, informative, and helpful for AI systems to understand the website structure and content.`
           }
         ],
         temperature: 0.7,
@@ -313,13 +322,83 @@ export async function POST(request: NextRequest) {
     
     // Step 1: Try to get sitemap URL from robots.txt
     let sitemapUrl = await getSitemapUrlFromRobots(baseUrl);
+    let sitemapSource = '';
+    let errorDetails: string[] = [];
     
-    // Step 2: If not found, default to website/sitemap.xml
-    if (!sitemapUrl) {
-      sitemapUrl = `${baseUrl}/sitemap.xml`;
-      console.log('[LLMS-TXT] Sitemap not in robots.txt, using default:', sitemapUrl);
-    } else {
+    // Step 2: Check if sitemap exists
+    let sitemapExists = false;
+    let checkedSitemapUrl = '';
+    
+    if (sitemapUrl) {
+      // robots.txt contains sitemap reference
+      checkedSitemapUrl = sitemapUrl;
+      sitemapSource = 'robots.txt';
       console.log('[LLMS-TXT] Found sitemap in robots.txt:', sitemapUrl);
+      
+      // Verify the sitemap actually exists
+      try {
+        const checkResponse = await fetch(sitemapUrl, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (checkResponse.ok) {
+          const content = await checkResponse.text();
+          // Verify it's actually XML
+          if (content.includes('<?xml') || content.includes('<urlset') || content.includes('<sitemapindex')) {
+            sitemapExists = true;
+          } else {
+            errorDetails.push(`Sitemap referenced in robots.txt (${sitemapUrl}) is not a valid XML file.`);
+          }
+        } else {
+          errorDetails.push(`Sitemap referenced in robots.txt (${sitemapUrl}) returned ${checkResponse.status} ${checkResponse.statusText}.`);
+        }
+      } catch (error) {
+        errorDetails.push(`Sitemap referenced in robots.txt (${sitemapUrl}) could not be accessed.`);
+      }
+    } else {
+      // robots.txt doesn't contain sitemap, check standard location
+      sitemapUrl = `${baseUrl}/sitemap.xml`;
+      checkedSitemapUrl = sitemapUrl;
+      sitemapSource = 'standard location';
+      console.log('[LLMS-TXT] Sitemap not in robots.txt, checking standard location:', sitemapUrl);
+      errorDetails.push('robots.txt does not contain a sitemap reference.');
+      
+      // Check if standard location sitemap exists
+      try {
+        const checkResponse = await fetch(sitemapUrl, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (checkResponse.ok) {
+          const content = await checkResponse.text();
+          // Verify it's actually XML
+          if (content.includes('<?xml') || content.includes('<urlset') || content.includes('<sitemapindex')) {
+            sitemapExists = true;
+          } else {
+            errorDetails.push(`Sitemap at standard location (${sitemapUrl}) is not a valid XML file.`);
+          }
+        } else {
+          errorDetails.push(`Sitemap at standard location (${sitemapUrl}) returned ${checkResponse.status} ${checkResponse.statusText}.`);
+        }
+      } catch (error) {
+        errorDetails.push(`Sitemap at standard location (${sitemapUrl}) could not be accessed.`);
+      }
+    }
+    
+    // If sitemap doesn't exist, return error with details
+    if (!sitemapExists) {
+      let errorMessage = '';
+      if (sitemapSource === 'robots.txt') {
+        errorMessage = 'Sitemap referenced in robots.txt is not accessible or invalid.';
+      } else {
+        errorMessage = 'No sitemap found at standard location.';
+      }
+      
+      return NextResponse.json({ 
+        error: errorMessage,
+        errorType: sitemapSource === 'robots.txt' ? 'sitemap_not_accessible' : 'sitemap_not_found',
+        errorDetails,
+        sitemapUrl: checkedSitemapUrl,
+        sitemapSource
+      }, { status: 404 });
     }
     
     console.log('[LLMS-TXT] Step 2/4: Collecting URLs from sitemap...');
@@ -329,7 +408,9 @@ export async function POST(request: NextRequest) {
     
     if (allUrls.length === 0) {
       return NextResponse.json({ 
-        error: 'No URLs found in sitemap. Please ensure the website has a valid sitemap.xml file.',
+        error: 'No URLs found in sitemap. The sitemap may be empty or contain only XML sitemap references.',
+        errorType: 'empty_sitemap',
+        errorDetails: [`Sitemap at ${sitemapUrl} was found but contains no valid URLs.`],
         sitemapUrl 
       }, { status: 404 });
     }

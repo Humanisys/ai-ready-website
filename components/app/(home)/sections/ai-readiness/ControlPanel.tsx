@@ -1275,8 +1275,27 @@ export default function ControlPanel({
                 if (data.success) {
                   setLlmsTxtContent(data.content);
                   setShowLlmsTxtModal(true);
+                  setLlmsTxtError(null);
                 } else {
-                  setLlmsTxtError(data.error || 'Failed to generate llms.txt');
+                  // Build detailed error message
+                  let errorMessage = data.error || 'Failed to generate llms.txt';
+                  
+                  if (data.errorDetails && Array.isArray(data.errorDetails)) {
+                    errorMessage += '\n\nDetails:\n' + data.errorDetails.map((detail: string, idx: number) => `${idx + 1}. ${detail}`).join('\n');
+                  }
+                  
+                  if (data.sitemapUrl) {
+                    errorMessage += `\n\nChecked location: ${data.sitemapUrl}`;
+                  }
+                  
+                  if (data.errorType === 'sitemap_not_found') {
+                    errorMessage = 'No sitemap.xml found.\n\n' + errorMessage;
+                  } else if (data.errorType === 'sitemap_not_accessible') {
+                    errorMessage = 'Sitemap referenced in robots.txt is not accessible.\n\n' + errorMessage;
+                  }
+                  
+                  setLlmsTxtError(errorMessage);
+                  setShowLlmsTxtModal(true); // Show modal even with errors so user can see the message
                 }
               } catch (error) {
                 console.error('LLMs.txt generation error:', error);
@@ -1498,7 +1517,8 @@ export default function ControlPanel({
               </div>
               
               {llmsTxtError && (
-                <div className="mb-16 p-12 bg-heat-200 bg-opacity-20 rounded-8 text-body-small text-heat-200">
+                <div className="mb-16 p-16 bg-heat-200 bg-opacity-20 rounded-8 text-body-small text-heat-200 whitespace-pre-line">
+                  <div className="font-semibold mb-8">Error generating llms.txt:</div>
                   {llmsTxtError}
                 </div>
               )}
