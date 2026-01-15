@@ -158,15 +158,15 @@ function filterLevel1Paths(urls: string[], domain: string): string[] {
  */
 async function generateLlmsTxtContent(level1Urls: string[], domain: string): Promise<string> {
   try {
-    // Use Groq API (same as ai-analysis route)
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    // Use OpenAI API for GPT-4o-mini
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'moonshotai/kimi-k2-instruct',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
