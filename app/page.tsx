@@ -267,15 +267,79 @@ export default function StyleGuidePage() {
                     }}
                   />
                   
-                  <div
-                    onClick={(e) => {
-                      e.preventDefault();
-                      if (url.length > 0) {
-                        handleAnalysis();
-                      }
-                    }}
-                  >
-                    <HeroInputSubmitButton dirty={url.length > 0} tab={tab} />
+                  <div className="flex gap-8 items-center">
+                    <button
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        if (!url) {
+                          setUrlError('Please enter a URL first');
+                          return;
+                        }
+                        
+                        setIsGeneratingLlmsTxt(true);
+                        setLlmsTxtError(null);
+                        setLlmsTxtContent(null);
+                        
+                        try {
+                          // Auto-prepend https:// if no protocol is provided
+                          let processedUrl = url.trim();
+                          if (!processedUrl.match(/^https?:\/\//i)) {
+                            processedUrl = 'https://' + processedUrl;
+                          }
+                          
+                          // Validate URL format
+                          try {
+                            const urlObj = new URL(processedUrl);
+                            if (!['http:', 'https:'].includes(urlObj.protocol)) {
+                              setLlmsTxtError('Please enter a valid URL (e.g., example.com)');
+                              setIsGeneratingLlmsTxt(false);
+                              return;
+                            }
+                          } catch (error) {
+                            setLlmsTxtError('Please enter a valid URL (e.g., example.com)');
+                            setIsGeneratingLlmsTxt(false);
+                            return;
+                          }
+                          
+                          const response = await fetch('/api/generate-llms-txt', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ url: processedUrl }),
+                          });
+                          
+                          const data = await response.json();
+                          
+                          if (data.success) {
+                            setLlmsTxtContent(data.content);
+                            setShowLlmsTxtModal(true);
+                          } else {
+                            setLlmsTxtError(data.error || 'Failed to generate llms.txt');
+                          }
+                        } catch (error) {
+                          console.error('LLMs.txt generation error:', error);
+                          setLlmsTxtError('An error occurred while generating llms.txt');
+                        } finally {
+                          setIsGeneratingLlmsTxt(false);
+                        }
+                      }}
+                      disabled={isGeneratingLlmsTxt || !url}
+                      className="px-16 py-8 bg-heat-100 hover:bg-heat-200 text-white rounded-8 text-label-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      {isGeneratingLlmsTxt ? 'Generating...' : 'Generate llms.txt'}
+                    </button>
+                    
+                    <div
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (url.length > 0) {
+                          handleAnalysis();
+                        }
+                      }}
+                    >
+                      <HeroInputSubmitButton dirty={url.length > 0} tab={tab} />
+                    </div>
                   </div>
                 </div>
                 
@@ -294,75 +358,6 @@ export default function StyleGuidePage() {
                   <AsciiExplosion className="-top-200" />
                 </div>
               </div>
-              
-              {/* Generate llms.txt Button - Always visible */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-                className="mt-16 flex justify-center"
-              >
-                <button
-                  onClick={async () => {
-                    if (!url) {
-                      setUrlError('Please enter a URL first');
-                      return;
-                    }
-                    
-                    setIsGeneratingLlmsTxt(true);
-                    setLlmsTxtError(null);
-                    setLlmsTxtContent(null);
-                    
-                    try {
-                      // Auto-prepend https:// if no protocol is provided
-                      let processedUrl = url.trim();
-                      if (!processedUrl.match(/^https?:\/\//i)) {
-                        processedUrl = 'https://' + processedUrl;
-                      }
-                      
-                      // Validate URL format
-                      try {
-                        const urlObj = new URL(processedUrl);
-                        if (!['http:', 'https:'].includes(urlObj.protocol)) {
-                          setLlmsTxtError('Please enter a valid URL (e.g., example.com)');
-                          setIsGeneratingLlmsTxt(false);
-                          return;
-                        }
-                      } catch (error) {
-                        setLlmsTxtError('Please enter a valid URL (e.g., example.com)');
-                        setIsGeneratingLlmsTxt(false);
-                        return;
-                      }
-                      
-                      const response = await fetch('/api/generate-llms-txt', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ url: processedUrl }),
-                      });
-                      
-                      const data = await response.json();
-                      
-                      if (data.success) {
-                        setLlmsTxtContent(data.content);
-                        setShowLlmsTxtModal(true);
-                      } else {
-                        setLlmsTxtError(data.error || 'Failed to generate llms.txt');
-                      }
-                    } catch (error) {
-                      console.error('LLMs.txt generation error:', error);
-                      setLlmsTxtError('An error occurred while generating llms.txt');
-                    } finally {
-                      setIsGeneratingLlmsTxt(false);
-                    }
-                  }}
-                  disabled={isGeneratingLlmsTxt || !url}
-                  className="px-20 py-10 bg-heat-100 hover:bg-heat-200 text-white rounded-8 text-label-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isGeneratingLlmsTxt ? 'Generating llms.txt...' : 'Generate llms.txt'}
-                </button>
-              </motion.div>
               
               {/* Hero Scraping Animation */}
               <HeroScraping />
